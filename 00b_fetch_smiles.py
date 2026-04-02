@@ -24,9 +24,9 @@ If PubChem is completely blocked (DNS failure):
 import csv
 import json
 import time
-import urllib.request
-import urllib.error
 from pathlib import Path
+
+import requests
 
 RAW           = Path("data/raw")
 DATA          = Path("data")
@@ -43,33 +43,39 @@ RETRY_WAIT    = 5       # seconds, doubled on each retry
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
+
+
 def stitch_to_cid(stitch_id: str) -> int:
+    """
+    Convert a STITCH compound ID to a PubChem CID.
+
+    STITCH format: CID + [0|1] + 8-digit zero-padded PubChem CID
+      - First digit after 'CID' is the flat(0)/stereo(1) indicator
+      - Remaining 8 digits are the PubChem CID
+
+    Examples:
+      CID004485548  -> flat,   CID 4485548
+      CID100020430  -> stereo, CID   20430  (NOT 100020430)
+    """
     try:
-        return int(stitch_id.replace("CID", "").lstrip("0") or "0")
-    except ValueError:
+        digits = stitch_id.replace("CID", "")   # 9 chars: [0|1][8-digit CID]
+        return int(digits[1:])                   # skip flat/stereo indicator
+    except (ValueError, IndexError):
         return 0
 
 
 def make_request(url: str) -> bytes | None:
-    """Fetch URL with proper headers and retry on rate-limit."""
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip, deflate",
-    }
-    req = urllib.request.Request(url, headers=headers)
-
+    """Fetch URL with retry on rate-limit."""
     for attempt in range(MAX_RETRIES + 1):
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
-                return r.read()
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 503) and attempt < MAX_RETRIES:
+            r = SESSION.get(url, timeout=15)
+            if r.status_code == 200:
+                return r.content
+            if r.status_code in (429, 503) and attempt < MAX_RETRIES:
                 wait = RETRY_WAIT * (2 ** attempt)
-                print(f"    Rate limit (HTTP {e.code}) — waiting {wait}s...")
+                print(f"    Rate limit (HTTP {r.status_code}) — waiting {wait}s...")
                 time.sleep(wait)
             else:
                 return None
