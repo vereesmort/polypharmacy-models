@@ -396,13 +396,14 @@ def add_structural_similarity_edges(data: HeteroData) -> int:
     # Compute fingerprints
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem, DataStructs
+        from rdkit.Chem import rdFingerprintGenerator, DataStructs
 
+        gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=1024)
         fps = {}
         for idx, smi in smiles_map.items():
             mol = Chem.MolFromSmiles(smi)
             if mol:
-                fps[idx] = AllChem.GetMorganFingerprintAsBitVect(mol, 2, 1024)
+                fps[idx] = gen.GetFingerprint(mol)
 
         def sim_fn(a, b):
             return DataStructs.TanimotoSimilarity(a, b)

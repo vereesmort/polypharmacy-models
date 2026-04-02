@@ -110,18 +110,18 @@ def compute_fingerprints_rdkit(smiles_map: dict) -> dict:
     Returns {node_idx: fingerprint_bitvect}
     """
     from rdkit import Chem
-    from rdkit.Chem import AllChem
+    from rdkit.Chem import rdFingerprintGenerator
 
+    gen = rdFingerprintGenerator.GetMorganGenerator(
+        radius=FINGERPRINT_RADIUS, fpSize=FINGERPRINT_BITS
+    )
     fps   = {}
     bad   = 0
     for idx, smiles in smiles_map.items():
         try:
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None:
-                fp = AllChem.GetMorganFingerprintAsBitVect(
-                    mol, FINGERPRINT_RADIUS, FINGERPRINT_BITS
-                )
-                fps[idx] = fp
+                fps[idx] = gen.GetFingerprint(mol)
             else:
                 bad += 1
         except Exception:

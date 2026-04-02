@@ -159,8 +159,7 @@ def compute_morgan_fingerprints(drug_idx, nbits=MORGAN_NBITS, radius=MORGAN_RADI
     """
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem
-        from rdkit.Chem import rdMolDescriptors
+        from rdkit.Chem import rdFingerprintGenerator
         rdkit_available = True
     except ImportError:
         print("  Warning: RDKit not available, using random drug features.")
@@ -187,6 +186,7 @@ def compute_morgan_fingerprints(drug_idx, nbits=MORGAN_NBITS, radius=MORGAN_RADI
         print("  Run fetch_smiles.py first, or features will be random init.")
         smiles_cache = {}
 
+    gen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=nbits)
     hits = 0
     for drug_id, idx in drug_idx.items():
         smiles = smiles_cache.get(drug_id)
@@ -194,8 +194,8 @@ def compute_morgan_fingerprints(drug_idx, nbits=MORGAN_NBITS, radius=MORGAN_RADI
             try:
                 mol = Chem.MolFromSmiles(smiles)
                 if mol:
-                    fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=nbits)
-                    feats[idx] = np.array(fp, dtype=np.float32)
+                    fp = gen.GetFingerprintAsNumPy(mol)
+                    feats[idx] = fp.astype(np.float32)
                     hits += 1
             except Exception:
                 pass
