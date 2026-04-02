@@ -8,7 +8,7 @@ wget http://snap.stanford.edu/decagon/bio-decagon-targets.tar.gz
 
 wget http://snap.stanford.edu/decagon/bio-decagon-combo.tar.gz
 wget http://snap.stanford.edu/decagon/bio-decagon-mono.tar.gz
-#wget http://snap.stanford.edu/decagon/bio-decagon-effectcategories.tar.gz -- This is unusued in this analysis
+wget http://snap.stanford.edu/decagon/bio-decagon-effectcategories.tar.gz
 
 for f in *.gz;
 do
