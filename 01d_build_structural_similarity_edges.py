@@ -24,7 +24,7 @@ Usage:
     python 01d_build_structural_similarity_edges.py
 
 Requirements:
-    pip install rdkit          (or conda install rdkit)
+    pip install rdkit-pypi     (or conda install rdkit)
 
     If rdkit is not available, the script falls back to a Morgan
     fingerprint approximation using only the SMILES string length
@@ -48,7 +48,8 @@ RAW   = DATA / "raw"
 PROC  = DATA / "processed"
 PROC.mkdir(parents=True, exist_ok=True)
 
-SMILES_FILE   = RAW  / "drug_smiles.csv"
+SMILES_FILE_CSV  = RAW  / "drug_smiles.csv"
+SMILES_FILE_JSON = DATA / "drug_smiles.json"   # output of 00b_fetch_smiles.py
 DRUG_IDX_FILE = PROC / "drug_node_mapping.csv"
 OUT_EDGES     = PROC / "structural_similarity_edges.json"
 OUT_STATS     = PROC / "structural_similarity_stats.json"
@@ -63,16 +64,32 @@ FINGERPRINT_RADIUS = 2      # ECFP4 radius
 
 def load_drug_idx() -> dict:
     """Returns {stitch_id: node_idx}"""
-    if not DRUG_IDX_FILE.exists():
-        raise FileNotFoundError(
-            f"{DRUG_IDX_FILE} not found. Run 02_build_graph.py first."
-        )
-    drug_idx = {}
-    with open(DRUG_IDX_FILE) as f:
-        for row in csv.DictReader(f):
-            drug_idx[row["drug_id"]] = int(row["node_idx"])
-    print(f"  Loaded {len(drug_idx)} drug nodes")
-    return drug_idx
+    import json as _json
+
+    # Source 1: meta.json (produced by 02_build_graph.py) — preferred
+    meta_path = PROC / "meta.json"
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = _json.load(f)
+        if "drug_idx" in meta:
+            drug_idx = {k: int(v) for k, v in meta["drug_idx"].items()}
+            print(f"  Loaded {len(drug_idx)} drug nodes from meta.json")
+            return drug_idx
+
+    # Source 2: drug_node_mapping.csv (legacy)
+    if DRUG_IDX_FILE.exists():
+        drug_idx = {}
+        with open(DRUG_IDX_FILE) as f:
+            for row in csv.DictReader(f):
+                drug_idx[row["drug_id"]] = int(row["node_idx"])
+        print(f"  Loaded {len(drug_idx)} drug nodes from drug_node_mapping.csv")
+        return drug_idx
+
+    raise FileNotFoundError(
+        "Cannot find drug node mapping. Run 02_build_graph.py first.\n"
+        f"Expected: {meta_path} (with drug_idx key)\n"
+        f"      or: {DRUG_IDX_FILE}"
+    )
 
 
 # ── Load SMILES ───────────────────────────────────────────────────────────────
@@ -80,26 +97,40 @@ def load_drug_idx() -> dict:
 def load_smiles(drug_idx: dict) -> dict:
     """
     Returns {node_idx: smiles_string} for all drugs with valid SMILES.
+    Tries drug_smiles.json first (output of 00b_fetch_smiles.py),
+    then drug_smiles.csv as fallback.
     """
-    if not SMILES_FILE.exists():
-        raise FileNotFoundError(
-            f"{SMILES_FILE} not found. Run 00b_fetch_smiles.py first."
-        )
-
     smiles_map = {}
-    skipped    = 0
-    with open(SMILES_FILE) as f:
-        for row in csv.DictReader(f):
-            drug_id = row.get("drug_id", row.get("STITCH", "")).strip()
-            smiles  = row.get("smiles",  row.get("SMILES",  "")).strip()
+
+    # Source 1: drug_smiles.json  {stitch_id: smiles}  (primary)
+    if SMILES_FILE_JSON.exists():
+        with open(SMILES_FILE_JSON) as f:
+            raw = json.load(f)
+        for drug_id, smiles in raw.items():
             if drug_id in drug_idx and smiles and smiles != "N/A":
                 smiles_map[drug_idx[drug_id]] = smiles
-            else:
-                skipped += 1
+        print(f"  Loaded SMILES for {len(smiles_map)} drugs from drug_smiles.json")
+        return smiles_map
 
-    print(f"  Loaded SMILES for {len(smiles_map)} drugs "
-          f"({skipped} skipped — missing or N/A)")
-    return smiles_map
+    # Source 2: drug_smiles.csv  (fallback)
+    if SMILES_FILE_CSV.exists():
+        skipped = 0
+        with open(SMILES_FILE_CSV) as f:
+            for row in csv.DictReader(f):
+                drug_id = row.get("drug_id", row.get("STITCH", "")).strip()
+                smiles  = row.get("smiles",  row.get("SMILES",  "")).strip()
+                if drug_id in drug_idx and smiles and smiles != "N/A":
+                    smiles_map[drug_idx[drug_id]] = smiles
+                else:
+                    skipped += 1
+        print(f"  Loaded SMILES for {len(smiles_map)} drugs from drug_smiles.csv")
+        return smiles_map
+
+    raise FileNotFoundError(
+        "No SMILES file found. Run 00b_fetch_smiles.py first.\n"
+        f"Expected: {SMILES_FILE_JSON}\n"
+        f"      or: {SMILES_FILE_CSV}"
+    )
 
 
 # ── Fingerprint computation ───────────────────────────────────────────────────
@@ -110,18 +141,18 @@ def compute_fingerprints_rdkit(smiles_map: dict) -> dict:
     Returns {node_idx: fingerprint_bitvect}
     """
     from rdkit import Chem
-    from rdkit.Chem import rdFingerprintGenerator
+    from rdkit.Chem import AllChem
 
-    gen = rdFingerprintGenerator.GetMorganGenerator(
-        radius=FINGERPRINT_RADIUS, fpSize=FINGERPRINT_BITS
-    )
     fps   = {}
     bad   = 0
     for idx, smiles in smiles_map.items():
         try:
             mol = Chem.MolFromSmiles(smiles)
             if mol is not None:
-                fps[idx] = gen.GetFingerprint(mol)
+                fp = AllChem.GetMorganFingerprintAsBitVect(
+                    mol, FINGERPRINT_RADIUS, FINGERPRINT_BITS
+                )
+                fps[idx] = fp
             else:
                 bad += 1
         except Exception:
@@ -260,7 +291,7 @@ def main():
     else:
         print("\nRDKit not available — using SMILES trigram fallback")
         print("Install rdkit for proper molecular fingerprints:")
-        print("  pip install rdkit")
+        print("  pip install rdkit-pypi")
         print("  or: conda install -c conda-forge rdkit")
         fps          = compute_fingerprints_fallback(smiles_map)
         tanimoto_fn  = tanimoto_fallback
