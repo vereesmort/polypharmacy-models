@@ -24,7 +24,7 @@ Usage:
     python 01d_build_structural_similarity_edges.py
 
 Requirements:
-    pip install rdkit-pypi     (or conda install rdkit)
+    pip install rdkit          (or conda install rdkit)
 
     If rdkit is not available, the script falls back to a Morgan
     fingerprint approximation using only the SMILES string length
@@ -260,7 +260,7 @@ def main():
     else:
         print("\nRDKit not available — using SMILES trigram fallback")
         print("Install rdkit for proper molecular fingerprints:")
-        print("  pip install rdkit-pypi")
+        print("  pip install rdkit")
         print("  or: conda install -c conda-forge rdkit")
         fps          = compute_fingerprints_fallback(smiles_map)
         tanimoto_fn  = tanimoto_fallback

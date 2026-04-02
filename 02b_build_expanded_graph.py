@@ -412,7 +412,7 @@ def add_structural_similarity_edges(data: HeteroData) -> int:
 
     except ImportError:
         print("  RDKit not available — using SMILES trigram fallback")
-        print("  Install: pip install rdkit-pypi")
+        print("  Install: pip install rdkit")
         fps = {}
         for idx, smi in smiles_map.items():
             clean = smi.replace("@","").replace("/","").replace("\\","")
