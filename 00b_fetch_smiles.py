@@ -87,6 +87,17 @@ def make_request(url: str) -> bytes | None:
     return None
 
 
+_SMILES_KEYS = ("CanonicalSMILES", "ConnectivitySMILES", "IsomericSMILES", "SMILES")
+
+
+def _extract_smiles(prop: dict) -> str | None:
+    """Return the first SMILES field found — handles PubChem API field renames."""
+    for key in _SMILES_KEYS:
+        if key in prop:
+            return prop[key]
+    return None
+
+
 def fetch_batch(cids: list) -> dict:
     """Fetch SMILES for up to 100 CIDs in one request."""
     cid_str = ",".join(str(c) for c in cids)
@@ -98,10 +109,8 @@ def fetch_batch(cids: list) -> dict:
     if not raw:
         return {}
     try:
-        data  = json.loads(raw)
-        props = data.get("PropertyTable", {}).get("Properties", [])
-        return {int(p["CID"]): p["CanonicalSMILES"] for p in props
-                if "CanonicalSMILES" in p}
+        props = json.loads(raw).get("PropertyTable", {}).get("Properties", [])
+        return {int(p["CID"]): s for p in props if (s := _extract_smiles(p))}
     except Exception:
         return {}
 
@@ -116,8 +125,8 @@ def fetch_single(cid: int) -> str | None:
     if not raw:
         return None
     try:
-        data = json.loads(raw)
-        return data["PropertyTable"]["Properties"][0]["CanonicalSMILES"]
+        props = json.loads(raw).get("PropertyTable", {}).get("Properties", [])
+        return _extract_smiles(props[0]) if props else None
     except Exception:
         return None
 
