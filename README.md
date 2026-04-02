@@ -1,8 +1,3 @@
-# PolypharmacyHGT
-
-Heterogeneous Graph Transformer for polypharmacy side-effect prediction.
-MSc Thesis — Biologically Meaningful Representation Learning for Drug Combination Adverse Effects.
-
 ## Research Question
 
 Do structured biological priors — pathway membership, phenotypic side-effect ontology,
