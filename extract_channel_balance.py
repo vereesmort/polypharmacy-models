@@ -50,11 +50,11 @@ OUTPUT_CSV  = RESULTS / "channel_balance.csv"
 def load_graph_and_model(checkpoint_path: str = "checkpoints/best_model.pt"):
     from model import PolypharmacyHGT
 
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     cfg  = ckpt["config"]
 
     # Load graph
-    data = torch.load(PROCESSED / "graph.pt", map_location="cpu")
+    data = torch.load(PROCESSED / "graph.pt", map_location="cpu", weights_only=False)
 
     # Rebuild model
     model = PolypharmacyHGT(

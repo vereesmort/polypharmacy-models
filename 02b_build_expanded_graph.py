@@ -59,7 +59,7 @@ OUT_STATS  = PROC / "graph_expanded_stats.json"
 
 def load_base_graph() -> HeteroData:
     print(f"Loading base graph from {IN_GRAPH}...")
-    data = torch.load(IN_GRAPH, map_location="cpu")
+    data = torch.load(IN_GRAPH, map_location="cpu", weights_only=False)
     for ntype in data.node_types:
         n = data[ntype].num_nodes
         print(f"  {ntype:<12}: {n:>7} nodes")

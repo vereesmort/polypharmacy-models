@@ -43,7 +43,7 @@ def main():
     rng = np.random.default_rng(SEED)
 
     print("Loading combo edges and graph meta...")
-    combo = torch.load(PROCESSED / "combo_edges.pt")
+    combo = torch.load(PROCESSED / "combo_edges.pt", weights_only=False)
     edge_index  = combo["edge_index"]   # [2, N_pairs]
     edge_labels = combo["edge_labels"]  # [N_pairs, num_se]
     top_se_ids  = combo["top_se_ids"]
