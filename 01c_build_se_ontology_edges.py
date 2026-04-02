@@ -200,63 +200,98 @@ def build_hpo_edges(se_idx: dict, hpo_parents: dict,
     return deduped
 
 
-# ── Strategy B: Disease-class fallback edges ──────────────────────────────────
+# ── Strategy B: Keyword-based phenotypic grouping (working fallback) ─────────
 
 def build_disease_class_edges(se_idx: dict) -> list:
     """
-    Connect SE nodes that share the same disease class from
-    bio-decagon-effectcategories.csv. This is a coarse fallback
-    when HPO mapping is unavailable.
+    Connect mono SE nodes sharing the same clinical phenotype group,
+    inferred by keyword matching on SE names from bio-decagon-mono.csv.
 
-    Edges are undirected (add both directions) since disease class
-    is a flat grouping, not a hierarchy.
+    Why not bio-decagon-effectcategories.csv:
+        That file maps COMBO SE IDs — a completely disjoint UMLS set from
+        mono SE IDs. Overlap is zero, producing 0 edges. Keyword matching
+        on SE names works directly on mono SE nodes.
+
+    15 organ-system groups derived from clinical pharmacology.
+    Edges are undirected (both directions). Capped at MAX_PER_GROUP.
     """
-    print("  Building disease-class edges (fallback mode)...")
+    print("  Building keyword phenotypic group edges (fallback mode)...")
 
-    if not EFFECT_CAT_FILE.exists():
-        print("  bio-decagon-effectcategories.csv not found — skipping")
+    if not MONO_SE_FILE.exists():
+        print(f"  {MONO_SE_FILE} not found — skipping")
         return []
 
-    # Load disease class per SE
-    se_to_class = {}
-    with open(EFFECT_CAT_FILE) as f:
+    mono_names = {}
+    with open(MONO_SE_FILE) as f:
         for row in csv.DictReader(f):
-            cui = row["Side Effect"]
-            cls = row["Disease Class"]
-            se_to_class[cui] = cls
+            mono_names[row["Individual Side Effect"]] = \
+                row["Side Effect Name"].lower()
 
-    # Group SE nodes by disease class
-    class_to_ses = defaultdict(list)
-    for cui, node_idx in se_idx.items():
-        cls = se_to_class.get(cui)
-        if cls:
-            class_to_ses[cls].append((cui, node_idx))
+    GROUPS = {
+        "renal":           ["kidney","renal","nephro","creatinine","proteinuria",
+                            "oliguria","glomerulo","urinary tract"],
+        "hepatic":         ["liver","hepat","bilirubin","transaminase",
+                            "cholestasis","jaundice","cirrhosis","hepatocellular"],
+        "cardiac":         ["cardiac","heart","myocardial","arrhythmia","tachycardia",
+                            "bradycardia","angina","palpitation","coronary","atrial"],
+        "haematological":  ["anaemia","anemia","thrombocytopenia","leukopenia",
+                            "neutropenia","pancytopenia","haemorrhage","hemorrhage",
+                            "bleeding","coagulation","platelet"],
+        "neurological":    ["neuropathy","seizure","encephalopathy","headache",
+                            "dizziness","tremor","ataxia","cognitive","confusion",
+                            "paralysis","paresthesia","peripheral nerve"],
+        "gastrointestinal":["nausea","vomiting","diarrhea","diarrhoea","constipation",
+                            "abdominal","colitis","gastric","pancreatitis","intestinal"],
+        "respiratory":     ["pneumonia","dyspnoea","dyspnea","cough","pulmonary",
+                            "bronchospasm","respiratory","pleural","hypoventilation"],
+        "dermatological":  ["rash","pruritus","urticaria","dermatitis","alopecia",
+                            "skin","photosensitivity","erythema","exanthema"],
+        "musculoskeletal": ["myopathy","arthralgia","myalgia","rhabdomyolysis",
+                            "bone","joint","tendon","muscle","arthritis"],
+        "endocrine":       ["hypothyroidism","hyperthyroid","diabetes","hyperglycaemia",
+                            "hyperglycemia","adrenal","thyroid","hormone","insulin"],
+        "immune":          ["allergy","anaphylaxis","hypersensitivity","autoimmune",
+                            "immune","lupus","vasculitis","cytokine"],
+        "infectious":      ["infection","sepsis","bacteremia","fungal","viral",
+                            "opportunistic","abscess","bacteraemia"],
+        "metabolic":       ["electrolyte","hyponatremia","hypokalemia","hypocalcemia",
+                            "acidosis","alkalosis","dehydration","asthenia",
+                            "fatigue","weight loss","oedema","edema"],
+        "ocular":          ["eye","visual","optic","retina","cataract",
+                            "glaucoma","cornea","conjunctiv"],
+        "psychiatric":     ["anxiety","depression","psychosis","hallucination",
+                            "insomnia","agitation","mania","psychiatric","mood"],
+    }
 
-    # Connect all pairs within same disease class
+    MAX_PER_GROUP = 100
+
+    se_to_group = {}
+    for cui, name in mono_names.items():
+        for group, keywords in GROUPS.items():
+            if any(kw in name for kw in keywords):
+                se_to_group[cui] = group
+                break
+
+    group_to_nodes = defaultdict(list)
+    for cui, group in se_to_group.items():
+        if cui in se_idx:
+            group_to_nodes[group].append(se_idx[cui])
+
     edges = []
-    for cls, members in class_to_ses.items():
-        for i in range(len(members)):
-            for j in range(i + 1, len(members)):
-                _, idx_i = members[i]
-                _, idx_j = members[j]
-                # Both directions (undirected)
-                edges.append([idx_i, idx_j, "same_disease_class", 1])
-                edges.append([idx_j, idx_i, "same_disease_class", 1])
+    for group, nodes in group_to_nodes.items():
+        capped = nodes[:MAX_PER_GROUP]
+        for i in range(len(capped)):
+            for j in range(i + 1, len(capped)):
+                edges.append([capped[i], capped[j], "phenotype_group", 1])
+                edges.append([capped[j], capped[i], "phenotype_group", 1])
 
-    # Filter to classes with a reasonable number of members
-    # Very large classes (e.g. "unannotated") would add too many edges
-    class_sizes = {cls: len(m) for cls, m in class_to_ses.items()}
-    max_class_size = 50  # cap to avoid O(n^2) explosion in large classes
-    filtered = [e for e in edges
-                if class_sizes.get(se_to_class.get(
-                    next(cui for cui, idx in
-                         sum(class_to_ses.values(), [])
-                         if idx == e[0]), ""), 0) <= max_class_size]
-
-    print(f"  Disease classes found: {len(class_to_ses)}")
-    print(f"  Built {len(filtered)} disease-class edges "
-          f"(max class size = {max_class_size})")
-    return filtered
+    n_covered = len({e[0] for e in edges} | {e[1] for e in edges})
+    print(f"  Phenotypic groups: {len(group_to_nodes)}")
+    print(f"  SE nodes assigned: {len(se_to_group)} / {len(mono_names)}")
+    print(f"  SE nodes covered by edges: {n_covered}")
+    print(f"  Built {len(edges)} directed edges "
+          f"({len(edges)//2} unique pairs, cap={MAX_PER_GROUP}/group)")
+    return edges
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
