@@ -101,25 +101,57 @@ def load_protein_idx() -> dict:
     """
     Load the protein node index mapping built by 02_build_graph.py.
     Returns: {entrez_gene_id_str: node_idx}
-    """
-    import csv
-    protein_idx = {}
-    with open(PROTEIN_IDX_FILE) as f:
-        for row in csv.DictReader(f):
-            protein_idx[row["gene_id"]] = int(row["node_idx"])
 
-    # Also build from raw PPI file if mapping file doesn't exist
-    if not PROTEIN_IDX_FILE.exists():
-        print("protein_node_mapping.csv not found — building from PPI file")
+    Sources tried in order:
+        1. data/processed/meta.json          (protein_idx key)  ← primary
+        2. data/processed/protein_node_mapping.csv              ← legacy
+        3. data/raw/bio-decagon-ppi.csv      (rebuild from PPI) ← fallback
+    """
+    import csv as _csv
+    import json as _json
+
+    # ── Source 1: meta.json (produced by 02_build_graph.py) ──────────────────
+    meta_path = PROC / "meta.json"
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = _json.load(f)
+        if "protein_idx" in meta:
+            protein_idx = {k: int(v) for k, v in meta["protein_idx"].items()}
+            print(f"  Loaded {len(protein_idx)} protein nodes from meta.json")
+            return protein_idx
+
+    # ── Source 2: protein_node_mapping.csv (legacy) ───────────────────────────
+    if PROTEIN_IDX_FILE.exists():
+        protein_idx = {}
+        with open(PROTEIN_IDX_FILE) as f:
+            for row in _csv.DictReader(f):
+                protein_idx[row["gene_id"]] = int(row["node_idx"])
+        print(f"  Loaded {len(protein_idx)} protein nodes from protein_node_mapping.csv")
+        return protein_idx
+
+    # ── Source 3: rebuild from PPI file ───────────────────────────────────────
+    ppi_path = RAW / "bio-decagon-ppi.csv"
+    if ppi_path.exists():
+        print("  meta.json and protein_node_mapping.csv not found.")
+        print("  Rebuilding protein index from bio-decagon-ppi.csv...")
+        print("  NOTE: Run 02_build_graph.py first for the canonical index.")
         seen = set()
-        with open(RAW / "bio-decagon-ppi.csv") as f:
-            for row in csv.DictReader(f):
+        with open(ppi_path) as f:
+            for row in _csv.DictReader(f):
                 seen.add(row["Gene 1"])
                 seen.add(row["Gene 2"])
         protein_idx = {g: i for i, g in enumerate(sorted(seen))}
+        print(f"  Built {len(protein_idx)} protein nodes from PPI file")
+        return protein_idx
 
-    print(f"  Loaded {len(protein_idx)} protein nodes")
-    return protein_idx
+    raise FileNotFoundError(
+        "Cannot find protein node mapping. Make sure you have run:\n"
+        "    python 02_build_graph.py\n"
+        "before running 01b_build_pathway_edges.py.\n"
+        f"Expected: {meta_path} (with protein_idx key)\n"
+        f"      or: {PROTEIN_IDX_FILE}\n"
+        f"      or: {ppi_path}"
+    )
 
 
 # ── Step 3: Build pathway nodes and edges ────────────────────────────────────
