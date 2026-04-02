@@ -49,7 +49,7 @@ from model_baselines import RGCNPolypharmacy, HeteroSAGEPolypharmacy
 # ── Config ────────────────────────────────────────────────────────────────────
 
 MODEL_TYPE         = "rgcn"    # "rgcn" or "sage"
-USE_EXPANDED_GRAPH = False     # True = graph_expanded.pt
+USE_EXPANDED_GRAPH = True     # True = graph_expanded.pt
 
 HIDDEN_DIM         = 64
 NUM_LAYERS         = 2
