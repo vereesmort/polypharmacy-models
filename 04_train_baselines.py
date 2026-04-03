@@ -148,12 +148,14 @@ def weighted_bce(scores, labels, pos_weight):
 # ── Train one epoch ───────────────────────────────────────────────────────────
 
 def train_epoch(model, data, loader, drug_pathway_map,
-                optimizer, pos_weight, device):
+                optimizer, pos_weight, device, epoch, num_se):
     model.train()
     total_loss = 0.0
     n_samples  = 0
+    all_scores = []
+    all_labels = []
 
-    for src, dst, lbl in loader:
+    for src, dst, lbl in tqdm(loader, desc=f"  Train Ep {epoch:3d}", leave=False, unit="batch"):
         src, dst, lbl = src.to(device), dst.to(device), lbl.to(device)
         pair_idx = torch.stack([src, dst])
         optimizer.zero_grad()
@@ -164,15 +166,31 @@ def train_epoch(model, data, loader, drug_pathway_map,
         optimizer.step()
         total_loss += loss.item() * src.shape[0]
         n_samples  += src.shape[0]
+        all_scores.append(scores.detach().cpu())
+        all_labels.append(lbl.cpu())
 
-    return total_loss / max(n_samples, 1)
+    avg_loss  = total_loss / max(n_samples, 1)
+    scores_np = torch.cat(all_scores).numpy()
+    labels_np = torch.cat(all_labels).numpy()
+
+    auroc_list = []
+    for se in tqdm(range(num_se), desc=f"  Train AUROC  ", leave=False, unit="SE"):
+        y_t, y_p = labels_np[:, se], scores_np[:, se]
+        if 0 < y_t.sum() < len(y_t):
+            try:
+                auroc_list.append(roc_auc_score(y_t, y_p))
+            except Exception:
+                pass
+    train_auroc = float(np.mean(auroc_list)) if auroc_list else 0.0
+
+    return avg_loss, train_auroc
 
 
 # ── Evaluate (loss + AUROC + AUPRC) ──────────────────────────────────────────
 
 @torch.no_grad()
 def evaluate(model, data, loader, drug_pathway_map,
-             pos_weight, device, num_se):
+             pos_weight, device, num_se, desc="Eval"):
     model.eval()
     total_loss = 0.0
     n_samples  = 0
@@ -201,7 +219,7 @@ def evaluate(model, data, loader, drug_pathway_map,
 
     auroc_per_se = []
     auprc_per_se = []
-    for se in range(num_se):
+    for se in tqdm(range(num_se), desc=f"  {desc} AUROC   ", leave=False, unit="SE"):
         y_true = labels_np[:, se]
         y_pred = scores_np[:, se]
         if y_true.sum() == 0 or y_true.sum() == len(y_true):
@@ -539,21 +557,15 @@ def main():
     for epoch in range(start_epoch, EPOCHS + 1):
 
         # Train
-        train_loss = train_epoch(
+        train_loss, train_auroc = train_epoch(
             model, data, train_loader, drug_pathway_map,
-            optimizer, pos_weight, device
+            optimizer, pos_weight, device, epoch, num_se
         )
 
         # Validate (every epoch)
         val_loss, val_auroc, val_auprc = evaluate(
             model, data, val_loader, drug_pathway_map,
-            pos_weight, device, num_se
-        )
-
-        # Train AUROC (every epoch, uses cached z_drug)
-        train_loss_full, train_auroc, _ = evaluate(
-            model, data, train_loader, drug_pathway_map,
-            pos_weight, device, num_se
+            pos_weight, device, num_se, desc="Val"
         )
 
         scheduler.step()
@@ -570,7 +582,7 @@ def main():
         if epoch % EVAL_TEST_EVERY == 0 or epoch == 1:
             test_loss, test_auroc, test_auprc = evaluate(
                 model, data, test_loader, drug_pathway_map,
-                pos_weight, device, num_se
+                pos_weight, device, num_se, desc="Test"
             )
             history["test_loss"].append(test_loss)
             history["test_auroc"].append(test_auroc)
@@ -579,8 +591,9 @@ def main():
                         f" | test_auroc: {test_auroc:.4f}")
 
         print(f"Ep {epoch:3d} | "
-              f"train: {train_loss:.4f} | "
-              f"val: {val_loss:.4f} | "
+              f"train_loss: {train_loss:.4f} | "
+              f"train_auroc: {train_auroc:.4f} | "
+              f"val_loss: {val_loss:.4f} | "
               f"val_auroc: {val_auroc:.4f} | "
               f"val_auprc: {val_auprc:.4f}"
               f"{test_str}")
@@ -612,7 +625,7 @@ def main():
     model.load_state_dict(ckpt["model_state"])
     test_loss, test_auroc, test_auprc = evaluate(
         model, data, test_loader, drug_pathway_map,
-        pos_weight, device, num_se
+        pos_weight, device, num_se, desc="Final Test"
     )
     print(f"Test — loss: {test_loss:.4f} | AUROC: {test_auroc:.4f} | AUPRC: {test_auprc:.4f}")
 
